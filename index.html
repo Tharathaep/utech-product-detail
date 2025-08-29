@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <title>ระบบคำนวณราคา</title>
+  <style>
+    body {
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      background: #f4f6f9;
+      margin: 0;
+      padding: 0;
+      color: #333;
+    }
+    header {
+      background: #2d6cdf;
+      color: white;
+      padding: 1rem;
+      text-align: center;
+      font-size: 1.5rem;
+      font-weight: bold;
+    }
+    main {
+      max-width: 1100px;
+      margin: 2rem auto;
+      padding: 1rem;
+    }
+    .toolbar {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 1rem;
+    }
+    .btn {
+      border: none;
+      padding: 0.6rem 1rem;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      margin-right: 0.5rem;
+      transition: 0.3s;
+    }
+    .btn.primary { background: #2d6cdf; color: white; }
+    .btn.danger { background: #e74c3c; color: white; }
+    .btn.success { background: #27ae60; color: white; }
+    .btn:hover { opacity: 0.85; }
+    .table-card {
+      background: white;
+      border-radius: 12px;
+      padding: 1rem;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+      overflow-x: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 0.5rem;
+    }
+    th, td {
+      border: 1px solid #ddd;
+      padding: 0.6rem;
+      text-align: center;
+    }
+    th {
+      background: #f0f4f8;
+      font-weight: 600;
+    }
+    input {
+      width: 90%;
+      padding: 0.3rem;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      text-align: center;
+    }
+    .totals-grid {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 1rem;
+    }
+    .total-box {
+      background: white;
+      border-radius: 12px;
+      padding: 1rem 1.5rem;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+      font-size: 1.1rem;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <header>ระบบคำนวณราคา</header>
+  <main>
+    <section class="toolbar">
+      <div>
+        <button id="add-row" class="btn primary">➕ เพิ่มสินค้า</button>
+        <button id="clear-all" class="btn danger">🗑️ ล้างข้อมูล</button>
+        <button id="download" class="btn success">⬇️ ดาวน์โหลด PDF</button>
+      </div>
+    </section>
+
+    <section class="table-card" id="table-container">
+      <table id="product-table">
+        <thead>
+          <tr>
+            <th>สินค้า</th>
+            <th>ราคาต่อหน่วย</th>
+            <th>จำนวนจุดที่ 1</th>
+            <th>จำนวนจุดที่ 2</th>
+            <th>จำนวนจุดที่ 3</th>
+            <th>จำนวนจุดที่ 4</th>
+            <th>จำนวนจุดที่ 5</th>
+            <th>จำนวนจุดที่ 6</th>
+            <th>จำนวนจุดที่ 7</th>
+            <th>จำนวนจุดที่ 8</th>
+            <th>ราคารวม</th>
+            <th>จัดการ</th>
+          </tr>
+        </thead>
+        <tbody id="table-body"></tbody>
+      </table>
+    </section>
+
+    <section class="totals-grid">
+      <div class="total-box">
+        💰 ราคารวมทั้งหมด: <span id="grand-total">0</span> บาท
+      </div>
+    </section>
+  </main>
+
+  <!-- โหลด jsPDF + html2canvas ผ่าน CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <script>
+    const tableBody = document.getElementById("table-body");
+    const grandTotalEl = document.getElementById("grand-total");
+
+    // โหลดข้อมูลจาก LocalStorage
+    let products = JSON.parse(localStorage.getItem("products")) || [];
+
+    // ฟังก์ชันสร้างแถวใหม่
+    function createRow(product = {}) {
+      const row = document.createElement("tr");
+      row.innerHTML = `
+        <td><input type="text" class="name" value="${product.name || ""}"></td>
+        <td><input type="number" class="price" value="${product.price || 0}"></td>
+        ${Array.from({length: 8}, (_, i) => `
+          <td><input type="number" class="qty${i+1}" value="${product["qty"+(i+1)] || 0}"></td>
+        `).join("")}
+        <td class="total">0</td>
+        <td><button class="btn danger remove">ลบ</button></td>
+      `;
+      tableBody.appendChild(row);
+      bindRowEvents(row);
+      calculateRow(row);
+    }
+
+    // ผูก event ให้ input และปุ่มลบ
+    function bindRowEvents(row) {
+      row.querySelectorAll("input").forEach(input => {
+        input.addEventListener("input", () => {
+          calculateRow(row);
+          saveData();
+        });
+      });
+      row.querySelector(".remove").addEventListener("click", () => {
+        row.remove();
+        saveData();
+        calculateGrandTotal();
+      });
+    }
+
+    // คำนวณราคารวมต่อแถว
+    function calculateRow(row) {
+      const price = parseFloat(row.querySelector(".price").value) || 0;
+      let totalQty = 0;
+      for (let i=1; i<=8; i++) {
+        totalQty += parseFloat(row.querySelector(".qty"+i).value) || 0;
+      }
+      const total = price * totalQty;
+      row.querySelector(".total").textContent = total.toFixed(2);
+      calculateGrandTotal();
+    }
+
+    // คำนวณราคารวมทั้งหมด (รวม * 35%)
+    function calculateGrandTotal() {
+      let grand = 0;
+      document.querySelectorAll("#table-body tr").forEach(row => {
+        grand += parseFloat(row.querySelector(".total").textContent) || 0;
+      });
+      const final = grand * 1.35; // บวก 35%
+      grandTotalEl.textContent = final.toFixed(2);
+    }
+
+    // บันทึกลง LocalStorage
+    function saveData() {
+      const rows = [];
+      document.querySelectorAll("#table-body tr").forEach(row => {
+        const obj = {
+          name: row.querySelector(".name").value,
+          price: row.querySelector(".price").value
+        };
+        for (let i=1; i<=8; i++) {
+          obj["qty"+i] = row.querySelector(".qty"+i).value;
+        }
+        rows.push(obj);
+      });
+      localStorage.setItem("products", JSON.stringify(rows));
+    }
+
+    // โหลดข้อมูลเดิม
+    products.forEach(p => createRow(p));
+
+    // ปุ่มเพิ่มแถว
+    document.getElementById("add-row").addEventListener("click", () => createRow());
+
+    // ปุ่มล้างข้อมูล
+    document.getElementById("clear-all").addEventListener("click", () => {
+      if (confirm("ต้องการล้างข้อมูลทั้งหมดหรือไม่?")) {
+        tableBody.innerHTML = "";
+        localStorage.removeItem("products");
+        calculateGrandTotal();
+      }
+    });
+
+    // ปุ่มดาวน์โหลด PDF
+    document.getElementById("download").addEventListener("click", () => {
+      const element = document.querySelector("main");
+      html2pdf().from(element).set({
+        margin: 10,
+        filename: "pricing.pdf",
+        image: { type: "jpeg", quality: 0.98 },
+        html2canvas: { scale: 2 },
+        jsPDF: { unit: "mm", format: "a4", orientation: "portrait" }
+      }).save();
+    });
+  </script>
+</body>
+</html>
